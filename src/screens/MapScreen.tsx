@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Concert } from '../types/Concert';
@@ -27,11 +27,53 @@ export default function MapScreen() {
   const venues = Object.entries(venueGroups);
   const uniqueVenues = venues.length;
 
+  const openInAppleMaps = (concert: Concert) => {
+    if (concert.latitude && concert.longitude) {
+      // Open specific venue in Apple Maps
+      const url = `http://maps.apple.com/?q=${encodeURIComponent(concert.venue)}&ll=${concert.latitude},${concert.longitude}`;
+      Linking.openURL(url);
+    } else {
+      // Search for venue name in Apple Maps
+      const url = `http://maps.apple.com/?q=${encodeURIComponent(`${concert.venue}, ${concert.city}`)}`;
+      Linking.openURL(url);
+    }
+  };
+
+  const openAllVenuesInMaps = () => {
+    if (venues.length === 0) return;
+
+    // Create a multi-point Apple Maps URL with all venues
+    const venuesWithCoords = venues
+      .map(([_, venueConcerts]) => venueConcerts[0])
+      .filter(c => c.latitude && c.longitude);
+
+    if (venuesWithCoords.length > 0) {
+      // For multiple locations, we'll create a search for the first venue and let user explore
+      const firstVenue = venuesWithCoords[0];
+      const url = `http://maps.apple.com/?q=${encodeURIComponent(firstVenue.venue)}&ll=${firstVenue.latitude},${firstVenue.longitude}`;
+      Linking.openURL(url);
+    } else {
+      Alert.alert('Map Unavailable', 'No venue coordinates available for mapping');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Venues</Text>
-        <Text style={styles.subtitle}>{uniqueVenues} visited</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>Venues</Text>
+          <Text style={styles.subtitle}>{uniqueVenues} visited</Text>
+        </View>
+        {venues.length > 0 && (
+          <TouchableOpacity 
+            style={styles.mapButton}
+            onPress={openAllVenuesInMaps}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="map" size={18} color={colors.accent} />
+            <Text style={styles.mapButtonText}>Apple Maps</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -41,10 +83,18 @@ export default function MapScreen() {
           const showCount = venueConcerts.length;
           
           return (
-            <View key={venueKey} style={styles.venueCard}>
+            <TouchableOpacity 
+              key={venueKey} 
+              style={styles.venueCard}
+              onPress={() => openInAppleMaps(firstConcert)}
+              activeOpacity={0.7}
+            >
               <View style={styles.venueHeader}>
                 <View style={styles.venueInfo}>
-                  <Text style={styles.venueName}>{firstConcert.venue}</Text>
+                  <View style={styles.venueNameRow}>
+                    <Text style={styles.venueName}>{firstConcert.venue}</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </View>
                   <View style={styles.locationRow}>
                     <Ionicons name="location-sharp" size={14} color={colors.textSecondary} />
                     <Text style={styles.venueLocation}>{firstConcert.city}</Text>
@@ -78,7 +128,12 @@ export default function MapScreen() {
                   <Text style={styles.moreText}>+{venueConcerts.length - 3} more</Text>
                 )}
               </View>
-            </View>
+
+              <View style={styles.tapHint}>
+                <Ionicons name="map-outline" size={14} color={colors.textTertiary} />
+                <Text style={styles.tapHintText}>Tap to open in Apple Maps</Text>
+              </View>
+            </TouchableOpacity>
           );
         })}
 
@@ -100,9 +155,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg 
   },
   header: { 
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingHorizontal: spacing.md, 
     paddingTop: 60, 
     paddingBottom: spacing.lg 
+  },
+  headerLeft: {
+    flex: 1,
   },
   title: { 
     color: colors.text, 
@@ -114,6 +175,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary, 
     fontSize: fontSize.md, 
     marginTop: 4 
+  },
+  mapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.accent + '18',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    marginTop: 8,
+  },
+  mapButtonText: {
+    color: colors.accent,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
   },
   scrollContent: {
     paddingHorizontal: spacing.md,
@@ -134,11 +210,17 @@ const styles = StyleSheet.create({
   venueInfo: {
     flex: 1,
   },
+  venueNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   venueName: {
     color: colors.text,
     fontSize: fontSize.lg,
     fontWeight: '800',
-    marginBottom: 4,
+    flex: 1,
   },
   locationRow: {
     flexDirection: 'row',
@@ -155,6 +237,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    marginLeft: 12,
   },
   showCountText: {
     color: colors.text,
@@ -187,6 +270,7 @@ const styles = StyleSheet.create({
   },
   concertList: {
     gap: 6,
+    marginBottom: spacing.sm,
   },
   concertItem: {
     flexDirection: 'row',
@@ -209,6 +293,19 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  tapHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  tapHintText: {
+    color: colors.textTertiary,
+    fontSize: fontSize.xs,
+    fontStyle: 'italic',
   },
   empty: {
     alignItems: 'center',
