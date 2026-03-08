@@ -79,11 +79,11 @@ export default function HomeScreen() {
   const locationRef = useRef<TextInput>(null);
 
   const canSubmit = useMemo(() => {
-    return (
-      normalize(name).length > 0 &&
-      normalize(date).length > 0 &&
-      normalize(location).length > 0
-    );
+    const hasName = normalize(name).length > 0;
+    const hasDate = normalize(date).length > 0;
+    const hasLocation = normalize(location).length > 0;
+    console.log('canSubmit check:', { hasName, hasDate, hasLocation, name, date, location });
+    return hasName && hasDate && hasLocation;
   }, [name, date, location]);
 
   // "today" at local midnight
@@ -106,7 +106,7 @@ export default function HomeScreen() {
   const [spotifySuggestions, setSpotifySuggestions] = useState<SpotifyArtist[]>([]);
   const [selectedArtist, setSelectedArtist] = useState<SpotifyArtist | null>(null);
 
-  const debouncedName = useDebouncedValue(name, 250);
+  const debouncedName = useDebouncedValue(name, 500); // Increased debounce to reduce API calls
   const suggestCacheRef = useRef<Map<string, SpotifyArtist[]>>(new Map());
 
   useEffect(() => {
@@ -212,6 +212,7 @@ export default function HomeScreen() {
 
   /* ---------- helpers ---------- */
   const clearFields = useCallback(() => {
+    console.log('Clearing form fields');
     setName("");
     setSubName("");
     setDate("");
@@ -232,6 +233,8 @@ export default function HomeScreen() {
     const d = normalize(date);
     const loc = normalize(location);
     const sn = normalize(subName);
+
+    console.log('Validating fields:', { n, d, loc, sn });
 
     if (!n)
       return {
@@ -264,15 +267,23 @@ export default function HomeScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const submit = useCallback(async () => {
-    if (isSubmitting) return;
+    console.log('Submit button clicked');
+    
+    if (isSubmitting) {
+      console.log('Already submitting, ignoring click');
+      return;
+    }
 
+    console.log('Starting validation...');
     const v = validateFields();
     if (!v.ok) {
+      console.log('Validation failed:', v.title, v.msg);
       Alert.alert(v.title, v.msg);
       return;
     }
 
     const { n, sn, d, loc } = v.data;
+    console.log('Validation passed:', { n, sn, d, loc });
 
     // duplicate check BEFORE network call
     const newKey = normalizeKey(n, d, loc);
@@ -282,6 +293,7 @@ export default function HomeScreen() {
     });
 
     if (hasDup) {
+      console.log('Duplicate detected');
       Alert.alert(
         "Already Added",
         "That concert (same headliner/date/venue) is already in your list."
@@ -290,73 +302,87 @@ export default function HomeScreen() {
     }
 
     setIsSubmitting(true);
+    console.log('Starting submission process...');
 
-    const artistKey = normalize(n).toLowerCase();
-    let imageUrl: string | undefined;
-    let spotifyArtistId: string | undefined;
-    let spotifyArtistUrl: string | undefined;
+    try {
+      const artistKey = normalize(n).toLowerCase();
+      let imageUrl: string | undefined;
+      let spotifyArtistId: string | undefined;
+      let spotifyArtistUrl: string | undefined;
 
-    // If user picked from dropdown and it matches the headliner, trust it
-    const selectedMatches =
-      selectedArtist &&
-      normalize(selectedArtist.name ?? "").toLowerCase() === artistKey &&
-      !!selectedArtist.id;
+      // If user picked from dropdown and it matches the headliner, trust it
+      const selectedMatches =
+        selectedArtist &&
+        normalize(selectedArtist.name ?? "").toLowerCase() === artistKey &&
+        !!selectedArtist.id;
 
-    if (selectedMatches) {
-      imageUrl = selectedArtist?.imageUrl ?? undefined;
-      spotifyArtistId = selectedArtist?.id ?? undefined;
-      spotifyArtistUrl = selectedArtist?.spotifyUrl ?? undefined;
-    } else {
-      try {
-        const best = await fetchSpotifyBestArtist(n);
-        if (best?.imageUrl) imageUrl = best.imageUrl;
-        if (best?.id) spotifyArtistId = best.id;
-        if (best?.spotifyUrl) spotifyArtistUrl = best.spotifyUrl;
-      } catch (e) {
-        console.warn("Spotify best-artist lookup failed:", e);
+      if (selectedMatches) {
+        console.log('Using selected Spotify artist');
+        imageUrl = selectedArtist?.imageUrl ?? undefined;
+        spotifyArtistId = selectedArtist?.id ?? undefined;
+        spotifyArtistUrl = selectedArtist?.spotifyUrl ?? undefined;
+      } else {
+        console.log('Looking up Spotify artist...');
+        try {
+          const best = await fetchSpotifyBestArtist(n);
+          if (best?.imageUrl) imageUrl = best.imageUrl;
+          if (best?.id) spotifyArtistId = best.id;
+          if (best?.spotifyUrl) spotifyArtistUrl = best.spotifyUrl;
+        } catch (e) {
+          console.warn("Spotify best-artist lookup failed:", e);
+          // Continue without Spotify data - don't fail the whole submission
+        }
       }
+
+      const now = Date.now();
+      console.log('Creating new concert item...');
+
+      setConcerts((prev) => {
+        if (editingId) {
+          console.log('Updating existing concert');
+          return prev.map((c) =>
+            c.id === editingId
+              ? {
+                  ...c,
+                  name: n,
+                  subName: sn,
+                  date: d,
+                  location: loc,
+                  imageUrl,
+                  spotifyArtistId,
+                  spotifyArtistUrl,
+                  updatedAt: now,
+                }
+              : c
+          );
+        }
+
+        const newItem: Concert = {
+          id: makeId(),
+          name: n,
+          subName: sn,
+          date: d,
+          location: loc,
+          imageUrl,
+          spotifyArtistId,
+          spotifyArtistUrl,
+          createdAt: now,
+        };
+
+        console.log('Adding new concert:', newItem);
+        return [newItem, ...prev];
+      });
+
+      console.log('Concert added successfully!');
+      setEditingId(null);
+      clearFields();
+      Keyboard.dismiss();
+    } catch (error) {
+      console.error('Error during submission:', error);
+      Alert.alert('Error', 'Failed to add concert. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const now = Date.now();
-
-    setConcerts((prev) => {
-      if (editingId) {
-        return prev.map((c) =>
-          c.id === editingId
-            ? {
-                ...c,
-                name: n,
-                subName: sn,
-                date: d,
-                location: loc,
-                imageUrl,
-                spotifyArtistId,
-                spotifyArtistUrl,
-                updatedAt: now,
-              }
-            : c
-        );
-      }
-
-      const newItem: Concert = {
-        id: makeId(),
-        name: n,
-        subName: sn,
-        date: d,
-        location: loc,
-        imageUrl,
-        spotifyArtistId,
-        spotifyArtistUrl,
-        createdAt: now,
-      };
-
-      return [newItem, ...prev];
-    });
-
-    setEditingId(null);
-    clearFields();
-    Keyboard.dismiss();
-    setIsSubmitting(false);
   }, [validateFields, isSubmitting, concerts, editingId, clearFields, selectedArtist]);
 
   const startEdit = useCallback((concert: Concert) => {
@@ -400,6 +426,7 @@ export default function HomeScreen() {
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
   const onPickDay = useCallback((day: any) => {
+    console.log('Date picked:', day.dateString);
     setDate(day.dateString);
     setCalendarOpen(false);
   }, []);
@@ -515,6 +542,7 @@ export default function HomeScreen() {
                 <TextInput
                   value={name}
                   onChangeText={(t) => {
+                    console.log('Name changed to:', t);
                     setName(t);
                     // if user types after selecting, clear selection
                     if (
@@ -599,7 +627,10 @@ export default function HomeScreen() {
               <TextInput
                 ref={subNameRef}
                 value={subName}
-                onChangeText={setSubName}
+                onChangeText={(t) => {
+                  console.log('Openers changed to:', t);
+                  setSubName(t);
+                }}
                 placeholder="e.g., w/ Support"
                 placeholderTextColor="#66668a"
                 style={styles.input}
@@ -631,7 +662,10 @@ export default function HomeScreen() {
               <TextInput
                 ref={locationRef}
                 value={location}
-                onChangeText={setLocation}
+                onChangeText={(t) => {
+                  console.log('Location changed to:', t);
+                  setLocation(t);
+                }}
                 placeholder="e.g., The Fillmore"
                 placeholderTextColor="#66668a"
                 style={styles.input}
@@ -641,16 +675,21 @@ export default function HomeScreen() {
               />
 
               <Pressable
-                onPress={submit}
+                onPress={() => {
+                  console.log('Add Concert button pressed, canSubmit:', canSubmit, 'isSubmitting:', isSubmitting);
+                  submit();
+                }}
                 style={({ pressed }) => [
                   styles.button,
-                  (!canSubmit || isSubmitting || pressed) &&
-                    styles.buttonPressed,
                   (!canSubmit || isSubmitting) && styles.buttonDisabled,
+                  pressed && styles.buttonPressed,
                 ]}
                 disabled={!canSubmit || isSubmitting}
               >
-                <Text style={styles.buttonText}>
+                <Text style={[
+                  styles.buttonText,
+                  (!canSubmit || isSubmitting) && styles.buttonTextDisabled
+                ]}>
                   {isSubmitting
                     ? "Adding…"
                     : editingId
@@ -800,6 +839,7 @@ const styles = StyleSheet.create({
   buttonPressed: { opacity: 0.9 },
   buttonDisabled: { backgroundColor: "#2b2b3f" },
   buttonText: { color: "white", fontWeight: "700", fontSize: 16 },
+  buttonTextDisabled: { color: "#9a9ab5" },
 
   actionsRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   secondaryBtn: {

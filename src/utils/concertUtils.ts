@@ -133,15 +133,29 @@ export function initialsFromName(name: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+// Add delay function to reduce API rate limiting
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /* ========================= Spotify backend helpers ========================= */
 export async function fetchSpotifySuggest(q: string, signal?: AbortSignal): Promise<SpotifyArtist[]> {
   const term = normalize(q);
   if (!term) return [];
+  
+  // Add delay to reduce rate limiting
+  await delay(300);
+  
   const url = `${SPOTIFY_BACKEND_BASE_URL}/spotify/suggest?q=${encodeURIComponent(term)}`;
   try {
+    console.log('Fetching Spotify suggestions for:', term);
     const res = await fetch(url, { signal });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn('Spotify suggest API error:', res.status, res.statusText);
+      return [];
+    }
     const data = (await res.json()) as SpotifySuggestResponse;
+    console.log('Spotify suggestions received:', data.items?.length || 0);
     return Array.isArray(data?.items) ? data.items : [];
   } catch (e) {
     console.warn("Spotify suggest failed:", e);
@@ -152,11 +166,21 @@ export async function fetchSpotifySuggest(q: string, signal?: AbortSignal): Prom
 export async function fetchSpotifyBestArtist(q: string, signal?: AbortSignal): Promise<SpotifyArtist | null> {
   const term = normalize(q);
   if (!term) return null;
+  
+  // Add delay to reduce rate limiting
+  await delay(500);
+  
   const url = `${SPOTIFY_BACKEND_BASE_URL}/spotify/artist?q=${encodeURIComponent(term)}`;
   try {
+    console.log('Fetching best Spotify artist for:', term);
     const res = await fetch(url, { signal });
-    if (!res.ok) return null;
-    return (await res.json()) as SpotifyArtist;
+    if (!res.ok) {
+      console.warn('Spotify artist API error:', res.status, res.statusText);
+      return null;
+    }
+    const data = (await res.json()) as SpotifyArtist;
+    console.log('Spotify artist received:', data?.name || 'none');
+    return data;
   } catch (e) {
     console.warn("Spotify best-artist lookup failed:", e);
     return null;
@@ -183,50 +207,68 @@ function sanitizeConcertArray(input: unknown[]): Concert[] {
 }
 
 export async function saveConcerts(concerts: Concert[]) {
-  const payload: StoragePayloadV3 = { version: 3, concerts };
-  await AsyncStorage.setItem(STORAGE_KEY_V3, JSON.stringify(payload));
+  try {
+    const payload: StoragePayloadV3 = { version: 3, concerts };
+    await AsyncStorage.setItem(STORAGE_KEY_V3, JSON.stringify(payload));
+    console.log(`Saved ${concerts.length} concerts to storage`);
+  } catch (e) {
+    console.error('Failed to save concerts:', e);
+    throw e;
+  }
 }
 
 export async function loadConcerts(): Promise<Concert[]> {
-  // v3
-  const rawV3 = await AsyncStorage.getItem(STORAGE_KEY_V3);
-  if (rawV3) {
-    const parsed = JSON.parse(rawV3) as unknown;
-    const ok =
-      parsed &&
-      typeof parsed === "object" &&
-      (parsed as any).version === 3 &&
-      Array.isArray((parsed as any).concerts);
+  try {
+    // v3
+    const rawV3 = await AsyncStorage.getItem(STORAGE_KEY_V3);
+    if (rawV3) {
+      const parsed = JSON.parse(rawV3) as unknown;
+      const ok =
+        parsed &&
+        typeof parsed === "object" &&
+        (parsed as any).version === 3 &&
+        Array.isArray((parsed as any).concerts);
 
-    if (ok) return sanitizeConcertArray((parsed as any).concerts);
-  }
-
-  // migrate from v2
-  const rawV2 = await AsyncStorage.getItem(STORAGE_KEY_V2);
-  if (rawV2) {
-    const parsed = JSON.parse(rawV2) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      (parsed as any).version === 2 &&
-      Array.isArray((parsed as any).concerts)
-    ) {
-      const cleaned = sanitizeConcertArray((parsed as any).concerts);
-      await saveConcerts(cleaned);
-      return cleaned;
+      if (ok) {
+        const concerts = sanitizeConcertArray((parsed as any).concerts);
+        console.log(`Loaded ${concerts.length} concerts from storage v3`);
+        return concerts;
+      }
     }
-  }
 
-  // migrate from v1
-  const rawV1 = await AsyncStorage.getItem(STORAGE_KEY_V1);
-  if (rawV1) {
-    const parsed = JSON.parse(rawV1) as unknown;
-    if (Array.isArray(parsed)) {
-      const cleaned = sanitizeConcertArray(parsed);
-      await saveConcerts(cleaned);
-      return cleaned;
+    // migrate from v2
+    const rawV2 = await AsyncStorage.getItem(STORAGE_KEY_V2);
+    if (rawV2) {
+      const parsed = JSON.parse(rawV2) as unknown;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        (parsed as any).version === 2 &&
+        Array.isArray((parsed as any).concerts)
+      ) {
+        const cleaned = sanitizeConcertArray((parsed as any).concerts);
+        await saveConcerts(cleaned);
+        console.log(`Migrated ${cleaned.length} concerts from storage v2`);
+        return cleaned;
+      }
     }
-  }
 
-  return [];
+    // migrate from v1
+    const rawV1 = await AsyncStorage.getItem(STORAGE_KEY_V1);
+    if (rawV1) {
+      const parsed = JSON.parse(rawV1) as unknown;
+      if (Array.isArray(parsed)) {
+        const cleaned = sanitizeConcertArray(parsed);
+        await saveConcerts(cleaned);
+        console.log(`Migrated ${cleaned.length} concerts from storage v1`);
+        return cleaned;
+      }
+    }
+
+    console.log('No concerts found in storage');
+    return [];
+  } catch (e) {
+    console.error('Failed to load concerts:', e);
+    throw e;
+  }
 }
