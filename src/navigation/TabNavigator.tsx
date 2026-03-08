@@ -2,12 +2,14 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/HomeScreen';
+import PastShowsScreen from '../screens/PastShowsScreen';
 
 const Tab = createBottomTabNavigator();
 
 const tabIcon = (route: string, focused: boolean): keyof typeof Ionicons.glyphMap => {
   const icons: Record<string, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
     Home: ['musical-notes', 'musical-notes-outline'],
+    'Past Shows': ['time', 'time-outline'],
   };
   const pair = icons[route] || ['ellipse', 'ellipse-outline'];
   return focused ? pair[0] : pair[1];
@@ -36,7 +38,20 @@ export default function TabNavigator() {
         },
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen 
+        name="Home" 
+        component={HomeScreen} 
+        options={{
+          tabBarLabel: 'Home'
+        }}
+      />
+      <Tab.Screen 
+        name="Past Shows" 
+        component={PastShowsScreen} 
+        options={{
+          tabBarLabel: 'Past Shows'
+        }}
+      />
     </Tab.Navigator>
   );
 }
